@@ -1,0 +1,86 @@
+name: Simple Echo Workflow
+
+# ------------------------------------------------------------
+# Triggers
+# ------------------------------------------------------------
+on:
+  push:
+  workflow_dispatch:
+
+# ------------------------------------------------------------
+# Jobs
+# ------------------------------------------------------------
+jobs:
+  run-powershell:
+    # Run on your self-hosted runner
+    runs-on: self-hosted
+
+    # REQUIRED: attaches this job to the Production environment
+    # so environment secrets are available
+    environment: Production
+
+    # Run all steps inside a PowerShell-enabled container
+    container:
+      image: m365pnp/powershell:latest
+
+    # --------------------------------------------------------
+    # Environment variables (available to ALL steps)
+    # These pull from GitHub *environment* secrets
+    # --------------------------------------------------------
+    env:
+      BW_CLIENTID: ${{ secrets.BW_CLIENT_ID }}
+      BW_CLIENTSECRET: ${{ secrets.BW_CLIENT_SECRET }}
+
+    # --------------------------------------------------------
+    # Steps
+    # --------------------------------------------------------
+    steps:
+      # Checkout repository contents
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Install Bitwarden CLI inside the container
+      - name: Install Bitwarden CLI
+        shell: pwsh
+        run: |
+          # Install Node + npm (Bitwarden CLI dependency)
+          apk add --no-cache nodejs npm
+
+          # Install Bitwarden CLI globally
+          npm install -g @bitwarden/cli
+
+          # Create Bitwarden config directory (required in containers)
+          mkdir -p "/root/.config/Bitwarden CLI"
+          touch "/root/.config/Bitwarden CLI/data.json"
+
+          # Verify install
+          bw --version
+
+      # Authenticate to Bitwarden using API key (non-interactive)
+      - name: Login to Bitwarden (API key)
+        shell: pwsh
+        run: |
+          # Stop immediately on any error
+          $ErrorActionPreference = "Stop"
+
+          # Explicitly set Bitwarden API credentials from GitHub secrets
+          $env:BW_CLIENTID     = "${{ secrets.BW_CLIENT_ID }}"
+          $env:BW_CLIENTSECRET = "${{ secrets.BW_CLIENT_SECRET }}"
+
+          # Use Bitwarden cloud (default, but explicit is good)
+          bw config server https://vault.bitwarden.com
+
+          # Login using API credentials from secrets
+          bw login --apikey
+
+          # Gmail App Credentials
+          $creds = bw get item "a4ddeeae-5f24-4cdf-9b9c-b3f10054d9aa" | ConvertFrom-Json
+          $appUsername = $creds.login.username
+          $appPassword = $creds.login.password
+          Write-Host $appUsername
+
+      # Example step showing secrets are available
+      - name: Say Hello
+        shell: pwsh
+        run: |
+          Write-Host "Hello from inside the PowerShell container!"
